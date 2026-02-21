@@ -55,6 +55,7 @@ public partial class App : Application
 
         // Resolve the tray icon from Application.Resources.
         _trayIcon = TryFindResource("TrayIcon") as TaskbarIcon;
+        _trayIcon?.ForceCreate();
     }
 
     protected override void OnExit(ExitEventArgs e)

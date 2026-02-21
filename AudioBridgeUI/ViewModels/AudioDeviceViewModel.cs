@@ -122,18 +122,9 @@ public class AudioDeviceViewModel : ViewModelBase
     public void UpdateFrom(AudioDevice device)
     {
         IsActive = device.IsActive;
-
-        // Only update IsBridged from engine data if we are not in the middle of a toggle.
-        if (!_isTogglingBridge)
-        {
-            if (_isBridged != device.IsBridged)
-            {
-                _isBridged = device.IsBridged;
-                OnPropertyChanged(nameof(IsBridged));
-                OnPropertyChanged(nameof(IsVolumeEnabled));
-                OnPropertyChanged(nameof(StatusBrush));
-            }
-        }
+        // IsBridged is not updated here — the engine's get_devices response does
+        // not include bridge state.  That state is managed entirely by the UI
+        // via add_device / remove_device IPC calls.
     }
 
     private async Task ToggleBridgeAsync(bool addToBridge)
