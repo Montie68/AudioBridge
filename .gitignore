@@ -1,0 +1,40 @@
+# Build outputs
+[Bb]uild/
+[Oo]bj/
+[Bb]in/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+*.log
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+
+# NuGet
+packages/
+*.nupkg
+
+# .NET
+project.assets.json
+project.nuget.cache
+
+# OS files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Claude
+.claude/
