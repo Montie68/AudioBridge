@@ -138,18 +138,6 @@ public sealed class EngineProcessManager : IDisposable
         EngineStatusChanged?.Invoke(this, false);
     }
 
-    /// <summary>
-    /// Resets the auto-restart counter. Call this after a successful connection
-    /// to indicate the engine is stable.
-    /// </summary>
-    public void ResetRestartCount()
-    {
-        lock (_lock)
-        {
-            _restartCount = 0;
-        }
-    }
-
     private void OnEngineExited(object? sender, EventArgs e)
     {
         bool shouldRestart = false;

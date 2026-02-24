@@ -32,11 +32,6 @@ public class AudioDevice
     public bool IsDefault { get; set; }
 
     /// <summary>
-    /// Whether the device is currently added to the audio bridge.
-    /// </summary>
-    public bool IsBridged { get; set; }
-
-    /// <summary>
     /// Per-device volume level, ranging from 0.0 (mute) to 1.0 (full).
     /// Deserialized from the engine's get_devices response (Windows system volume).
     /// </summary>

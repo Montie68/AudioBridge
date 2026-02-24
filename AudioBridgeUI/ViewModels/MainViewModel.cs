@@ -45,6 +45,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private bool _startWithWindows;
     private bool _autoStartBridge;
     private bool _disposed;
+    private bool _isToggling;
 
     /// <summary>
     /// The list of audio devices to display in the UI.
@@ -214,6 +215,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private async Task ToggleBridgeAsync()
     {
+        _isToggling = true;
         try
         {
             bool success;
@@ -231,6 +233,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Toggle bridge failed: {ex.Message}");
+        }
+        finally
+        {
+            _isToggling = false;
         }
     }
 
@@ -254,32 +260,24 @@ public class MainViewModel : ViewModelBase, IDisposable
             var status = await _ipcClient.GetStatusAsync();
             if (status.HasValue)
             {
-                IsBridgeRunning = status.Value.IsRunning;
+                // Don't overwrite bridge state while user is toggling.
+                if (!_isToggling)
+                    IsBridgeRunning = status.Value.IsRunning;
 
-                // When the bridge is running, sync per-device bridge state
-                // with the engine's active device list.  This handles cases
-                // where the engine auto-removes a device (e.g., feedback
-                // prevention when the default output device changes).
-                if (status.Value.IsRunning)
+                // Sync per-device bridge state with the engine's active
+                // device list.  Handles engine auto-removes (feedback
+                // prevention), auto-adds (old default bridging), and
+                // bridge-stopped-externally (clears all).
+                var activeIds = new HashSet<string>(
+                    status.Value.ActiveDeviceIds,
+                    StringComparer.OrdinalIgnoreCase);
+
+                foreach (var device in Devices)
                 {
-                    var activeIds = new HashSet<string>(
-                        status.Value.ActiveDeviceIds,
-                        StringComparer.OrdinalIgnoreCase);
-
-                    foreach (var device in Devices)
-                    {
-                        if (device.IsBridged && !activeIds.Contains(device.DeviceId))
-                        {
-                            // Engine removed this device (e.g., feedback prevention).
-                            device.SetBridgedFromEngine(false);
-                        }
-                        else if (!device.IsBridged && activeIds.Contains(device.DeviceId))
-                        {
-                            // Engine auto-added this device (e.g., old default
-                            // was bridged when a new default device took over).
-                            device.SetBridgedFromEngine(true);
-                        }
-                    }
+                    if (device.IsBridged && !activeIds.Contains(device.DeviceId))
+                        device.SetBridgedState(false);
+                    else if (!device.IsBridged && activeIds.Contains(device.DeviceId))
+                        device.SetBridgedState(true);
                 }
             }
         }
@@ -316,12 +314,13 @@ public class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void MergeDeviceList(List<AudioDevice> devices)
     {
-        // Build a lookup of existing VMs by device ID.
-        var existingVms = new Dictionary<string, AudioDeviceViewModel>();
+        // Build a lookup of existing VMs by device ID (case-insensitive
+        // to match Windows device ID comparison semantics).
+        var existingVms = new Dictionary<string, AudioDeviceViewModel>(StringComparer.OrdinalIgnoreCase);
         foreach (var vm in Devices)
             existingVms[vm.DeviceId] = vm;
 
-        var currentIds = new HashSet<string>();
+        var currentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (AudioDevice device in devices)
         {

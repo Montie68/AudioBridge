@@ -49,14 +49,6 @@ public sealed class DeviceReconnectService : IDisposable
         _retryAttempts.Clear();
     }
 
-    /// <summary>
-    /// Resets retry counters for all devices (e.g., after a user manually re-adds a device).
-    /// </summary>
-    public void ResetRetries()
-    {
-        _retryAttempts.Clear();
-    }
-
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)

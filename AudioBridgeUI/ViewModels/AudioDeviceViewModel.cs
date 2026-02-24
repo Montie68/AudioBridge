@@ -84,8 +84,15 @@ public class AudioDeviceViewModel : ViewModelBase
         get => _isBridged;
         set
         {
-            if (_isBridged == value || _isTogglingBridge)
+            if (_isBridged == value)
                 return;
+
+            if (_isTogglingBridge)
+            {
+                // Reject the change and snap the checkbox back.
+                OnPropertyChanged(nameof(IsBridged));
+                return;
+            }
 
             _ = ToggleBridgeAsync(value);
         }
@@ -136,7 +143,6 @@ public class AudioDeviceViewModel : ViewModelBase
         DeviceName = device.DeviceName;
         _isActive = device.IsActive;
         _isDefault = device.IsDefault;
-        _isBridged = device.IsBridged;
         _volume = (int)(device.Volume * 100);
     }
 
@@ -180,20 +186,6 @@ public class AudioDeviceViewModel : ViewModelBase
             _volume = systemVol;
             OnPropertyChanged(nameof(Volume));
         }
-    }
-
-    /// <summary>
-    /// Updates the bridge state from engine-side changes without sending IPC
-    /// commands.  Used when the engine auto-removes a device (e.g., feedback
-    /// prevention when the default device changes).
-    /// </summary>
-    public void SetBridgedFromEngine(bool isBridged)
-    {
-        if (_isBridged == isBridged) return;
-        _isBridged = isBridged;
-        OnPropertyChanged(nameof(IsBridged));
-        OnPropertyChanged(nameof(IsVolumeEnabled));
-        OnPropertyChanged(nameof(StatusBrush));
     }
 
     private async Task ToggleBridgeAsync(bool addToBridge)
