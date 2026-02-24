@@ -141,6 +141,26 @@ public class AudioDeviceViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Sets the IsBridged state directly without triggering an IPC call.
+    /// Used when syncing UI state with engine state (e.g., on startup restore).
+    /// </summary>
+    internal void SetBridgedState(bool bridged, int volume = -1)
+    {
+        if (_isBridged == bridged && volume < 0)
+            return;
+
+        _isBridged = bridged;
+        if (volume >= 0)
+            _volume = Math.Clamp(volume, 0, 100);
+
+        OnPropertyChanged(nameof(IsBridged));
+        OnPropertyChanged(nameof(IsVolumeEnabled));
+        OnPropertyChanged(nameof(StatusBrush));
+        if (volume >= 0)
+            OnPropertyChanged(nameof(Volume));
+    }
+
+    /// <summary>
     /// Updates this view model's state from a fresh device model
     /// (used during periodic polling).
     /// </summary>

@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using H.NotifyIcon;
 using AudioBridgeUI.Services;
 using AudioBridgeUI.ViewModels;
@@ -21,6 +23,7 @@ public partial class App : Application
     private MainViewModel? _mainViewModel;
     private MainWindow? _mainWindow;
     private TaskbarIcon? _trayIcon;
+    private MenuItem? _trayToggleMenuItem;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -47,6 +50,7 @@ public partial class App : Application
 
         // Create ViewModel and Window.
         _mainViewModel = new MainViewModel(_ipcClient, _settingsService);
+        _mainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
         _mainWindow = new MainWindow { DataContext = _mainViewModel };
 
         // Initialize IPC connection and load initial data.
@@ -54,6 +58,11 @@ public partial class App : Application
 
         // Restore previously bridged devices from settings.
         await RestoreBridgedDevicesAsync();
+
+        // Sync ViewModel IsBridged state with engine's active device list,
+        // then restore persisted per-device volumes to the ViewModels.
+        await _mainViewModel.SyncBridgedStateFromEngineAsync();
+        RestoreDeviceVolumes();
 
         // Auto-start the bridge if the setting is enabled.
         BridgeSettings settings = _settingsService.LoadSettings();
@@ -70,12 +79,30 @@ public partial class App : Application
         // Resolve the tray icon from Application.Resources.
         _trayIcon = TryFindResource("TrayIcon") as TaskbarIcon;
         _trayIcon?.ForceCreate();
+
+        // Cache the toggle bridge menu item for dynamic header updates.
+        if (TryFindResource("TrayContextMenu") is ContextMenu trayMenu)
+        {
+            foreach (var item in trayMenu.Items)
+            {
+                if (item is MenuItem menuItem && menuItem.Tag is string tag
+                    && tag == "ToggleBridge")
+                {
+                    _trayToggleMenuItem = menuItem;
+                    break;
+                }
+            }
+        }
+
+        UpdateTrayToggleMenuText();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         // Save current settings.
         _mainViewModel?.SaveCurrentSettings();
+        if (_mainViewModel is not null)
+            _mainViewModel.PropertyChanged -= OnMainViewModelPropertyChanged;
         _mainViewModel?.Dispose();
 
         // Stop reconnect service.
@@ -133,6 +160,26 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Restores persisted volume levels to the corresponding device ViewModels.
+    /// </summary>
+    private void RestoreDeviceVolumes()
+    {
+        if (_mainViewModel is null || _settingsService is null)
+            return;
+
+        BridgeSettings settings = _settingsService.LoadSettings();
+        var volumeMap = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        foreach (var device in settings.BridgedDevices)
+            volumeMap[device.DeviceId] = device.Volume;
+
+        foreach (var deviceVm in _mainViewModel.Devices)
+        {
+            if (deviceVm.IsBridged && volumeMap.TryGetValue(deviceVm.DeviceId, out float vol))
+                deviceVm.SetBridgedState(true, (int)(vol * 100));
+        }
+    }
+
     private void OnEngineStatusChanged(object? sender, bool isRunning)
     {
         if (!isRunning && _ipcClient is not null)
@@ -150,6 +197,22 @@ public partial class App : Application
                     System.Diagnostics.Debug.WriteLine($"Engine reconnect failed: {ex.Message}");
                 }
             });
+        }
+    }
+
+    private void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.IsBridgeRunning))
+            Dispatcher.InvokeAsync(UpdateTrayToggleMenuText);
+    }
+
+    private void UpdateTrayToggleMenuText()
+    {
+        if (_trayToggleMenuItem is not null && _mainViewModel is not null)
+        {
+            _trayToggleMenuItem.Header = _mainViewModel.IsBridgeRunning
+                ? "Stop Bridge"
+                : "Start Bridge";
         }
     }
 

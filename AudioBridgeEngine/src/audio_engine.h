@@ -57,6 +57,9 @@ public:
     std::vector<std::wstring> GetActiveDeviceIds();
     bool IsRunning() const;
 
+    // Signals the capture thread to restart (e.g., after default device change).
+    void RequestCaptureRestart();
+
 private:
     // Thread entry points.
     void CaptureThreadProc();
@@ -69,6 +72,7 @@ private:
 
     // Capture state.
     std::atomic<bool>                           capture_running_{false};
+    std::atomic<bool>                           restart_capture_{false};
     std::thread                                 capture_thread_;
 
     // Render targets, guarded by mutex.  pending_ids_ tracks device IDs

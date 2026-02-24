@@ -58,6 +58,7 @@ void AudioEngine::Stop() {
     if (!capture_running_.load()) return;
 
     capture_running_.store(false);
+    restart_capture_.store(false);
     if (capture_thread_.joinable()) capture_thread_.join();
 
     // Stop all render targets.
@@ -281,6 +282,11 @@ bool AudioEngine::IsRunning() const {
     return capture_running_.load();
 }
 
+void AudioEngine::RequestCaptureRestart() {
+    restart_capture_.store(true);
+    LOG_INFO("Capture restart requested (default device changed).");
+}
+
 // ---------------------------------------------------------------------------
 // Capture thread
 // ---------------------------------------------------------------------------
@@ -299,202 +305,189 @@ void AudioEngine::CaptureThreadProc() {
     DWORD task_index = 0;
     HANDLE task = AvSetMmThreadCharacteristicsW(L"Audio", &task_index);
 
-    // Open the default render endpoint in loopback mode.
-    IMMDeviceEnumerator* enumerator = nullptr;
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                          __uuidof(IMMDeviceEnumerator),
-                          reinterpret_cast<void**>(&enumerator));
-    if (FAILED(hr) || !enumerator) {
-        LOG_ERROR("CoCreateInstance(MMDeviceEnumerator) in capture thread failed.");
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+    // Outer loop: restarts capture when the default device changes.
+    while (capture_running_.load()) {
+        restart_capture_.store(false);
 
-    IMMDevice* capture_device = nullptr;
-    hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &capture_device);
-    enumerator->Release();
-    if (FAILED(hr) || !capture_device) {
-        LOG_ERROR("GetDefaultAudioEndpoint (loopback) failed: 0x%08lX",
-                  static_cast<unsigned long>(hr));
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        // Open the default render endpoint in loopback mode.
+        IMMDeviceEnumerator* enumerator = nullptr;
+        hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator),
+                              reinterpret_cast<void**>(&enumerator));
+        if (FAILED(hr) || !enumerator) {
+            LOG_ERROR("CoCreateInstance(MMDeviceEnumerator) in capture thread failed.");
+            break;
+        }
 
-    IAudioClient* capture_client = nullptr;
-    hr = capture_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL,
-                                   nullptr, reinterpret_cast<void**>(&capture_client));
-    capture_device->Release();
-    if (FAILED(hr) || !capture_client) {
-        LOG_ERROR("Activate IAudioClient (loopback) failed.");
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        IMMDevice* capture_device = nullptr;
+        hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &capture_device);
+        enumerator->Release();
+        if (FAILED(hr) || !capture_device) {
+            LOG_ERROR("GetDefaultAudioEndpoint (loopback) failed: 0x%08lX",
+                      static_cast<unsigned long>(hr));
+            break;
+        }
 
-    WAVEFORMATEX* cap_fmt = nullptr;
-    hr = capture_client->GetMixFormat(&cap_fmt);
-    if (FAILED(hr) || !cap_fmt) {
-        LOG_ERROR("GetMixFormat (loopback) failed.");
-        capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        IAudioClient* capture_client = nullptr;
+        hr = capture_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL,
+                                       nullptr, reinterpret_cast<void**>(&capture_client));
+        capture_device->Release();
+        if (FAILED(hr) || !capture_client) {
+            LOG_ERROR("Activate IAudioClient (loopback) failed.");
+            break;
+        }
 
-    const UINT32 cap_channels = cap_fmt->nChannels;
-    const WORD   cap_bits     = cap_fmt->wBitsPerSample;
+        WAVEFORMATEX* cap_fmt = nullptr;
+        hr = capture_client->GetMixFormat(&cap_fmt);
+        if (FAILED(hr) || !cap_fmt) {
+            LOG_ERROR("GetMixFormat (loopback) failed.");
+            capture_client->Release();
+            break;
+        }
 
-    // Determine if the format is float or PCM.
-    bool is_float = false;
-    if (cap_fmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
-        is_float = true;
-    } else if (cap_fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
-        auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(cap_fmt);
-        if (ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
+        const UINT32 cap_channels = cap_fmt->nChannels;
+        const WORD   cap_bits     = cap_fmt->wBitsPerSample;
+
+        // Determine if the format is float or PCM.
+        bool is_float = false;
+        if (cap_fmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
             is_float = true;
-    }
+        } else if (cap_fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+            auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(cap_fmt);
+            if (ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
+                is_float = true;
+        }
 
-    const DWORD loopback_flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
-                                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-    const REFERENCE_TIME buffer_duration = 1000000; // 100 ms
-    hr = capture_client->Initialize(AUDCLNT_SHAREMODE_SHARED, loopback_flags,
-                                    buffer_duration, 0, cap_fmt, nullptr);
-    CoTaskMemFree(cap_fmt);
-    if (FAILED(hr)) {
-        LOG_ERROR("IAudioClient::Initialize (loopback) failed: 0x%08lX",
-                  static_cast<unsigned long>(hr));
-        capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        const DWORD loopback_flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
+                                     AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+        const REFERENCE_TIME buffer_duration = 1000000; // 100 ms
+        hr = capture_client->Initialize(AUDCLNT_SHAREMODE_SHARED, loopback_flags,
+                                        buffer_duration, 0, cap_fmt, nullptr);
+        CoTaskMemFree(cap_fmt);
+        if (FAILED(hr)) {
+            LOG_ERROR("IAudioClient::Initialize (loopback) failed: 0x%08lX",
+                      static_cast<unsigned long>(hr));
+            capture_client->Release();
+            break;
+        }
 
-    // Event-driven capture.
-    HANDLE capture_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!capture_event) {
-        LOG_ERROR("CreateEvent (capture) failed.");
-        capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
-    hr = capture_client->SetEventHandle(capture_event);
-    if (FAILED(hr)) {
-        LOG_ERROR("SetEventHandle (capture) failed: 0x%08lX",
-                  static_cast<unsigned long>(hr));
-        CloseHandle(capture_event);
-        capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        // Event-driven capture.
+        HANDLE capture_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!capture_event) {
+            LOG_ERROR("CreateEvent (capture) failed.");
+            capture_client->Release();
+            break;
+        }
+        hr = capture_client->SetEventHandle(capture_event);
+        if (FAILED(hr)) {
+            LOG_ERROR("SetEventHandle (capture) failed: 0x%08lX",
+                      static_cast<unsigned long>(hr));
+            CloseHandle(capture_event);
+            capture_client->Release();
+            break;
+        }
 
-    IAudioCaptureClient* capture_service = nullptr;
-    hr = capture_client->GetService(__uuidof(IAudioCaptureClient),
-                                    reinterpret_cast<void**>(&capture_service));
-    if (FAILED(hr) || !capture_service) {
-        LOG_ERROR("GetService(IAudioCaptureClient) failed: 0x%08lX",
-                  static_cast<unsigned long>(hr));
-        CloseHandle(capture_event);
-        capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
+        IAudioCaptureClient* capture_service = nullptr;
+        hr = capture_client->GetService(__uuidof(IAudioCaptureClient),
+                                        reinterpret_cast<void**>(&capture_service));
+        if (FAILED(hr) || !capture_service) {
+            LOG_ERROR("GetService(IAudioCaptureClient) failed: 0x%08lX",
+                      static_cast<unsigned long>(hr));
+            CloseHandle(capture_event);
+            capture_client->Release();
+            break;
+        }
 
-    hr = capture_client->Start();
-    if (FAILED(hr)) {
-        LOG_ERROR("IAudioClient::Start (loopback) failed: 0x%08lX",
-                  static_cast<unsigned long>(hr));
+        hr = capture_client->Start();
+        if (FAILED(hr)) {
+            LOG_ERROR("IAudioClient::Start (loopback) failed: 0x%08lX",
+                      static_cast<unsigned long>(hr));
+            capture_service->Release();
+            CloseHandle(capture_event);
+            capture_client->Release();
+            break;
+        }
+
+        LOG_INFO("Capture thread started (channels=%u, bits=%u, float=%d).",
+                 cap_channels, cap_bits, is_float ? 1 : 0);
+
+        // Temporary buffer for format conversion.
+        std::vector<float> convert_buf;
+
+        // ---- Inner capture loop (exits on shutdown OR restart request) ----
+        while (capture_running_.load() && !restart_capture_.load()) {
+            DWORD wait_result = WaitForSingleObject(capture_event, 100);
+            if (wait_result == WAIT_TIMEOUT) continue;
+            if (wait_result != WAIT_OBJECT_0) break;
+
+            BYTE*  data           = nullptr;
+            UINT32 frames_avail   = 0;
+            DWORD  flags          = 0;
+
+            while (true) {
+                hr = capture_service->GetBuffer(&data, &frames_avail, &flags,
+                                                nullptr, nullptr);
+                if (hr == AUDCLNT_S_BUFFER_EMPTY || frames_avail == 0) break;
+                if (FAILED(hr)) {
+                    LOG_ERROR("GetBuffer (capture) failed: 0x%08lX",
+                              static_cast<unsigned long>(hr));
+                    break;
+                }
+
+                const size_t total_samples = static_cast<size_t>(frames_avail) * cap_channels;
+                const float* float_data = nullptr;
+
+                if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+                    // Produce silence.
+                    convert_buf.assign(total_samples, 0.0f);
+                    float_data = convert_buf.data();
+                } else if (is_float) {
+                    // Data is already float -- just reinterpret.
+                    float_data = reinterpret_cast<const float*>(data);
+                } else if (cap_bits == 16) {
+                    // 16-bit PCM -> float conversion.
+                    convert_buf.resize(total_samples);
+                    const int16_t* pcm = reinterpret_cast<const int16_t*>(data);
+                    for (size_t i = 0; i < total_samples; ++i) {
+                        convert_buf[i] = static_cast<float>(pcm[i]) / 32768.0f;
+                    }
+                    float_data = convert_buf.data();
+                } else {
+                    // Unsupported PCM format (24-bit, 32-bit int, etc.) -- produce silence.
+                    LOG_ERROR("Unsupported capture PCM bit depth: %u. Producing silence.", cap_bits);
+                    convert_buf.assign(total_samples, 0.0f);
+                    float_data = convert_buf.data();
+                }
+
+                // Fan-out to all render ring buffers.
+                {
+                    std::lock_guard<std::mutex> lock(targets_mutex_);
+                    for (auto& target : targets_) {
+                        if (target->running.load()) {
+                            target->ring->push(float_data, total_samples);
+                        }
+                    }
+                }
+
+                capture_service->ReleaseBuffer(frames_avail);
+            }
+        }
+
+        // ---- Cleanup current capture session ----
+        capture_client->Stop();
         capture_service->Release();
         CloseHandle(capture_event);
         capture_client->Release();
-        if (task) AvRevertMmThreadCharacteristics(task);
-        CoUninitialize();
-        capture_running_.store(false);
-        return;
-    }
 
-    LOG_INFO("Capture thread started (channels=%u, bits=%u, float=%d).",
-             cap_channels, cap_bits, is_float ? 1 : 0);
-
-    // Temporary buffer for format conversion.
-    std::vector<float> convert_buf;
-
-    // ---- Main capture loop ----
-    while (capture_running_.load()) {
-        DWORD wait_result = WaitForSingleObject(capture_event, 100);
-        if (wait_result == WAIT_TIMEOUT) continue;
-        if (wait_result != WAIT_OBJECT_0) break;
-
-        BYTE*  data           = nullptr;
-        UINT32 frames_avail   = 0;
-        DWORD  flags          = 0;
-
-        while (true) {
-            hr = capture_service->GetBuffer(&data, &frames_avail, &flags,
-                                            nullptr, nullptr);
-            if (hr == AUDCLNT_S_BUFFER_EMPTY || frames_avail == 0) break;
-            if (FAILED(hr)) {
-                LOG_ERROR("GetBuffer (capture) failed: 0x%08lX",
-                          static_cast<unsigned long>(hr));
-                break;
-            }
-
-            const size_t total_samples = static_cast<size_t>(frames_avail) * cap_channels;
-            const float* float_data = nullptr;
-
-            if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-                // Produce silence.
-                convert_buf.assign(total_samples, 0.0f);
-                float_data = convert_buf.data();
-            } else if (is_float) {
-                // Data is already float -- just reinterpret.
-                float_data = reinterpret_cast<const float*>(data);
-            } else if (cap_bits == 16) {
-                // 16-bit PCM -> float conversion.
-                convert_buf.resize(total_samples);
-                const int16_t* pcm = reinterpret_cast<const int16_t*>(data);
-                for (size_t i = 0; i < total_samples; ++i) {
-                    convert_buf[i] = static_cast<float>(pcm[i]) / 32768.0f;
-                }
-                float_data = convert_buf.data();
-            } else {
-                // Unsupported PCM format (24-bit, 32-bit int, etc.) -- produce silence.
-                LOG_ERROR("Unsupported capture PCM bit depth: %u. Producing silence.", cap_bits);
-                convert_buf.assign(total_samples, 0.0f);
-                float_data = convert_buf.data();
-            }
-
-            // Fan-out to all render ring buffers.
-            {
-                std::lock_guard<std::mutex> lock(targets_mutex_);
-                for (auto& target : targets_) {
-                    if (target->running.load()) {
-                        target->ring->push(float_data, total_samples);
-                    }
-                }
-            }
-
-            capture_service->ReleaseBuffer(frames_avail);
+        if (restart_capture_.load() && capture_running_.load()) {
+            LOG_INFO("Restarting capture for new default device...");
+            Sleep(200);
+            continue;
         }
-    }
+    } // end outer while
 
-    // ---- Cleanup ----
-    capture_client->Stop();
-    capture_service->Release();
-    CloseHandle(capture_event);
-    capture_client->Release();
+    capture_running_.store(false);
+
     if (task) AvRevertMmThreadCharacteristics(task);
     CoUninitialize();
 

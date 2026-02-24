@@ -185,6 +185,33 @@ public class MainViewModel : ViewModelBase, IDisposable
         UpdateStatusText();
     }
 
+    /// <summary>
+    /// Synchronizes the IsBridged state of device ViewModels with the engine's
+    /// active device list. Called after restoring devices from settings on startup.
+    /// </summary>
+    public async Task SyncBridgedStateFromEngineAsync()
+    {
+        try
+        {
+            var status = await _ipcClient.GetStatusAsync();
+            if (!status.HasValue)
+                return;
+
+            var activeIds = new HashSet<string>(
+                status.Value.ActiveDeviceIds, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var device in Devices)
+            {
+                if (activeIds.Contains(device.DeviceId))
+                    device.SetBridgedState(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Sync bridged state failed: {ex.Message}");
+        }
+    }
+
     private async Task ToggleBridgeAsync()
     {
         try

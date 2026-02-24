@@ -58,6 +58,15 @@ int main() {
     }
 
     AudioEngine engine(&device_mgr);
+
+    // Restart capture when the default audio device changes so the bridge
+    // seamlessly switches to capturing from the new default output.
+    device_mgr.SetDefaultDeviceChangedCallback([&engine]() {
+        if (engine.IsRunning()) {
+            engine.RequestCaptureRestart();
+        }
+    });
+
     IpcServer   ipc(&engine, &device_mgr);
 
     ipc.Start();

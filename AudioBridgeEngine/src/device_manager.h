@@ -42,8 +42,13 @@ public:
     std::vector<DeviceInfo> GetOutputDevices();
     std::wstring            GetDefaultOutputDeviceId();
 
-    // ---- Notification callback ----
+    // ---- Notification callbacks ----
     void SetDeviceChangeCallback(std::function<void()> cb);
+    void SetDefaultDeviceChangedCallback(std::function<void()> cb);
+
+    // ---- System volume control (IAudioEndpointVolume) ----
+    float GetDeviceVolume(const std::wstring& device_id);
+    bool  SetDeviceVolume(const std::wstring& device_id, float volume);
 
     // ---- Wanted-device tracking ----
     void AddWantedDevice(const std::wstring& id, const std::wstring& name);
@@ -69,6 +74,7 @@ private:
 
     std::mutex               cb_mutex_;
     std::function<void()>    device_change_cb_;
+    std::function<void()>    default_device_changed_cb_;
 
     std::mutex               wanted_mutex_;
     std::vector<DeviceInfo>  wanted_devices_;

@@ -130,6 +130,11 @@ void DeviceManager::SetDeviceChangeCallback(std::function<void()> cb) {
     device_change_cb_ = std::move(cb);
 }
 
+void DeviceManager::SetDefaultDeviceChangedCallback(std::function<void()> cb) {
+    std::lock_guard<std::mutex> lock(cb_mutex_);
+    default_device_changed_cb_ = std::move(cb);
+}
+
 // ---------------------------------------------------------------------------
 // Wanted-device list
 // ---------------------------------------------------------------------------
@@ -238,12 +243,15 @@ HRESULT STDMETHODCALLTYPE DeviceManager::OnDefaultDeviceChanged(
     EDataFlow flow, ERole /*role*/, LPCWSTR /*pwstrDefaultDeviceId*/) {
     if (flow == eRender) {
         LOG_INFO("Default render device changed.");
-        std::function<void()> cb;
+        std::function<void()> general_cb;
+        std::function<void()> default_cb;
         {
             std::lock_guard<std::mutex> lock(cb_mutex_);
-            cb = device_change_cb_;
+            general_cb = device_change_cb_;
+            default_cb = default_device_changed_cb_;
         }
-        if (cb) cb();
+        if (general_cb) general_cb();
+        if (default_cb) default_cb();
     }
     return S_OK;
 }

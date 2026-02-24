@@ -8,7 +8,7 @@
         <!-- System tray context menu -->
         <ContextMenu x:Key="TrayContextMenu">
             <MenuItem Header="Open" Click="TrayOpen_Click" FontWeight="Bold"/>
-            <MenuItem x:Name="TrayToggleBridgeItem" Header="Start Bridge" Click="TrayToggleBridge_Click"/>
+            <MenuItem x:Name="TrayToggleBridgeItem" Header="Start Bridge" Tag="ToggleBridge" Click="TrayToggleBridge_Click"/>
             <Separator/>
             <MenuItem Header="Exit" Click="TrayExit_Click"/>
         </ContextMenu>
