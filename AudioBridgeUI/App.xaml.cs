@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Windows;
 using H.NotifyIcon;
 using AudioBridgeUI.Services;
@@ -11,6 +12,8 @@ namespace AudioBridgeUI;
 /// </summary>
 public partial class App : Application
 {
+    private static readonly Mutex SingleInstanceMutex = new(true, "AudioBridge_SingleInstance");
+
     private SettingsService? _settingsService;
     private EngineIpcClient? _ipcClient;
     private EngineProcessManager? _processManager;
@@ -21,6 +24,13 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        if (!SingleInstanceMutex.WaitOne(TimeSpan.Zero, exitContext: false))
+        {
+            // Another instance is already running.
+            Shutdown();
+            return;
+        }
+
         base.OnStartup(e);
 
         // Create services.
@@ -79,6 +89,9 @@ public partial class App : Application
 
         // Dispose tray icon.
         _trayIcon?.Dispose();
+
+        // Release the singleton mutex.
+        try { SingleInstanceMutex.ReleaseMutex(); } catch (ApplicationException) { }
 
         base.OnExit(e);
     }

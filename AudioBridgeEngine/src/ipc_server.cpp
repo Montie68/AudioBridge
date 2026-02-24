@@ -284,12 +284,14 @@ std::string IpcServer::ProcessCommand(const std::string& json_str) {
 
         if (action == "get_devices") {
             auto devices = device_mgr_->GetOutputDevices();
+            std::wstring default_id = device_mgr_->GetDefaultOutputDeviceId();
             json arr = json::array();
             for (auto& d : devices) {
                 arr.push_back({
-                    {"id",     WideToUtf8(d.id)},
-                    {"name",   WideToUtf8(d.name)},
-                    {"active", d.active}
+                    {"id",         WideToUtf8(d.id)},
+                    {"name",       WideToUtf8(d.name)},
+                    {"active",     d.active},
+                    {"is_default", d.id == default_id}
                 });
             }
             response = {{"success", true}, {"devices", arr}};

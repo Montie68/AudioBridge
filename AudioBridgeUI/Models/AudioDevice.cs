@@ -26,6 +26,12 @@ public class AudioDevice
     public bool IsActive { get; set; }
 
     /// <summary>
+    /// Whether this is the current default audio output device (the source AudioBridge captures from).
+    /// </summary>
+    [JsonPropertyName("is_default")]
+    public bool IsDefault { get; set; }
+
+    /// <summary>
     /// Whether the device is currently added to the audio bridge.
     /// </summary>
     public bool IsBridged { get; set; }

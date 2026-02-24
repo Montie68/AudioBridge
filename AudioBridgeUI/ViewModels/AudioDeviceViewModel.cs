@@ -24,6 +24,7 @@ public class AudioDeviceViewModel : ViewModelBase
 
     private readonly EngineIpcClient _ipcClient;
     private bool _isActive;
+    private bool _isDefault;
     private bool _isBridged;
     private int _volume = 100;
     private bool _isTogglingBridge;
@@ -47,9 +48,32 @@ public class AudioDeviceViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _isActive, value))
+            {
                 OnPropertyChanged(nameof(StatusBrush));
+                OnPropertyChanged(nameof(IsCheckboxEnabled));
+            }
         }
     }
+
+    /// <summary>
+    /// Whether this is the current Windows default audio output device.
+    /// AudioBridge captures from this device, so it cannot be a bridge target.
+    /// </summary>
+    public bool IsDefault
+    {
+        get => _isDefault;
+        set
+        {
+            if (SetProperty(ref _isDefault, value))
+                OnPropertyChanged(nameof(IsCheckboxEnabled));
+        }
+    }
+
+    /// <summary>
+    /// Whether the bridge checkbox should be enabled.
+    /// Disabled for inactive or default devices.
+    /// </summary>
+    public bool IsCheckboxEnabled => _isActive && !_isDefault;
 
     /// <summary>
     /// Whether the device is currently added to the audio bridge.
@@ -111,6 +135,7 @@ public class AudioDeviceViewModel : ViewModelBase
         DeviceId = device.DeviceId;
         DeviceName = device.DeviceName;
         _isActive = device.IsActive;
+        _isDefault = device.IsDefault;
         _isBridged = device.IsBridged;
         _volume = (int)(device.Volume * 100);
     }
@@ -122,6 +147,7 @@ public class AudioDeviceViewModel : ViewModelBase
     public void UpdateFrom(AudioDevice device)
     {
         IsActive = device.IsActive;
+        IsDefault = device.IsDefault;
         // IsBridged is not updated here — the engine's get_devices response does
         // not include bridge state.  That state is managed entirely by the UI
         // via add_device / remove_device IPC calls.

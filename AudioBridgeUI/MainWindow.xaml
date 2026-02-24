@@ -18,6 +18,8 @@
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="#AAAAAA"/>
         <SolidColorBrush x:Key="SliderTrackBrush" Color="#555555"/>
 
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
         <!-- Button style -->
         <Style x:Key="AccentButton" TargetType="Button">
             <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
@@ -146,10 +148,19 @@
                                 <!-- Bridge toggle checkbox -->
                                 <CheckBox Grid.Row="0" Grid.Column="0"
                                           IsChecked="{Binding IsBridged}"
-                                          Style="{StaticResource DarkCheckBox}"
+                                          IsEnabled="{Binding IsCheckboxEnabled}"
                                           VerticalAlignment="Center"
-                                          Margin="0,0,8,0"
-                                          IsEnabled="{Binding IsActive}"/>
+                                          Margin="0,0,8,0">
+                                    <CheckBox.Style>
+                                        <Style TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDefault}" Value="True">
+                                                    <Setter Property="ToolTip" Value="This is the default audio output. AudioBridge captures from it — it can't be a bridge target."/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </CheckBox.Style>
+                                </CheckBox>
 
                                 <!-- Status indicator dot -->
                                 <Ellipse Grid.Row="0" Grid.Column="1"
@@ -158,13 +169,28 @@
                                          VerticalAlignment="Center"
                                          Margin="0,0,8,0"/>
 
-                                <!-- Device name -->
-                                <TextBlock Grid.Row="0" Grid.Column="2"
-                                           Text="{Binding DeviceName}"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           FontSize="13"
-                                           TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center"/>
+                                <!-- Device name + Source badge -->
+                                <StackPanel Grid.Row="0" Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding DeviceName}"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               FontSize="13"
+                                               TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center"/>
+                                    <Border Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Background="#3A5A7A"
+                                            CornerRadius="3"
+                                            Padding="4,1"
+                                            Margin="6,0,0,0"
+                                            VerticalAlignment="Center"
+                                            ToolTip="This is the default audio output. AudioBridge captures from it — it can't be a bridge target.">
+                                        <TextBlock Text="Source"
+                                                   Foreground="#90C8F0"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"/>
+                                    </Border>
+                                </StackPanel>
 
                                 <!-- Volume slider row -->
                                 <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
