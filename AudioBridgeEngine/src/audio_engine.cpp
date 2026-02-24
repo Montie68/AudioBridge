@@ -554,13 +554,11 @@ void AudioEngine::RenderThreadProc(RenderTarget* target) {
         const size_t samples_needed = static_cast<size_t>(frames_available) * channels;
         const size_t samples_read   = target->ring->pop(read_buf.data(), samples_needed);
 
-        // Apply volume and copy into the render buffer.
+        // Copy captured audio into the render buffer (volume is controlled
+        // via the Windows system volume on each endpoint, not a software
+        // multiplier).
         float* dst = reinterpret_cast<float*>(render_data);
-        const float vol = target->volume.load(std::memory_order_relaxed);
-
-        for (size_t i = 0; i < samples_read; ++i) {
-            dst[i] = read_buf[i] * vol;
-        }
+        std::memcpy(dst, read_buf.data(), samples_read * sizeof(float));
 
         // Fill any remaining samples with silence (ring buffer underrun).
         if (samples_read < samples_needed) {

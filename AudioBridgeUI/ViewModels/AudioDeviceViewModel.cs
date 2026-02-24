@@ -171,6 +171,15 @@ public class AudioDeviceViewModel : ViewModelBase
         // IsBridged is not updated here — the engine's get_devices response does
         // not include bridge state.  That state is managed entirely by the UI
         // via add_device / remove_device IPC calls.
+
+        // Sync system volume from engine (set backing field directly to avoid
+        // re-sending the value back via IPC).
+        int systemVol = (int)(device.Volume * 100);
+        if (_volume != systemVol)
+        {
+            _volume = systemVol;
+            OnPropertyChanged(nameof(Volume));
+        }
     }
 
     private async Task ToggleBridgeAsync(bool addToBridge)

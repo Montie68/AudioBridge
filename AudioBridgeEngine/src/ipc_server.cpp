@@ -291,7 +291,8 @@ std::string IpcServer::ProcessCommand(const std::string& json_str) {
                     {"id",         WideToUtf8(d.id)},
                     {"name",       WideToUtf8(d.name)},
                     {"active",     d.active},
-                    {"is_default", d.id == default_id}
+                    {"is_default", d.id == default_id},
+                    {"volume",     device_mgr_->GetDeviceVolume(d.id)}
                 });
             }
             response = {{"success", true}, {"devices", arr}};
@@ -323,8 +324,8 @@ std::string IpcServer::ProcessCommand(const std::string& json_str) {
             if (id.empty()) {
                 response = {{"success", false}, {"error", "device_id required"}};
             } else {
-                engine_->SetDeviceVolume(id, vol);
-                response = {{"success", true}};
+                bool ok = device_mgr_->SetDeviceVolume(id, vol);
+                response = {{"success", ok}};
             }
 
         } else if (action == "start") {

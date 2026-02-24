@@ -38,6 +38,8 @@ public class AudioDevice
 
     /// <summary>
     /// Per-device volume level, ranging from 0.0 (mute) to 1.0 (full).
+    /// Deserialized from the engine's get_devices response (Windows system volume).
     /// </summary>
+    [JsonPropertyName("volume")]
     public float Volume { get; set; } = 1.0f;
 }

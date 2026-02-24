@@ -3,6 +3,7 @@
 #include "device_manager.h"
 #include "common.h"
 
+#include <endpointvolume.h>
 #include <algorithm>
 #include <cassert>
 
@@ -119,6 +120,48 @@ std::wstring DeviceManager::GetDefaultOutputDeviceId() {
     }
     device->Release();
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// System volume control
+// ---------------------------------------------------------------------------
+
+float DeviceManager::GetDeviceVolume(const std::wstring& device_id) {
+    if (!enumerator_ || device_id.empty()) return 1.0f;
+
+    IMMDevice* device = nullptr;
+    HRESULT hr = enumerator_->GetDevice(device_id.c_str(), &device);
+    if (FAILED(hr) || !device) return 1.0f;
+
+    IAudioEndpointVolume* endpoint_vol = nullptr;
+    hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL,
+                          nullptr, reinterpret_cast<void**>(&endpoint_vol));
+    device->Release();
+    if (FAILED(hr) || !endpoint_vol) return 1.0f;
+
+    float level = 1.0f;
+    endpoint_vol->GetMasterVolumeLevelScalar(&level);
+    endpoint_vol->Release();
+    return level;
+}
+
+bool DeviceManager::SetDeviceVolume(const std::wstring& device_id, float volume) {
+    if (!enumerator_ || device_id.empty()) return false;
+
+    IMMDevice* device = nullptr;
+    HRESULT hr = enumerator_->GetDevice(device_id.c_str(), &device);
+    if (FAILED(hr) || !device) return false;
+
+    IAudioEndpointVolume* endpoint_vol = nullptr;
+    hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL,
+                          nullptr, reinterpret_cast<void**>(&endpoint_vol));
+    device->Release();
+    if (FAILED(hr) || !endpoint_vol) return false;
+
+    hr = endpoint_vol->SetMasterVolumeLevelScalar(
+        std::clamp(volume, 0.0f, 1.0f), nullptr);
+    endpoint_vol->Release();
+    return SUCCEEDED(hr);
 }
 
 // ---------------------------------------------------------------------------
