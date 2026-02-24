@@ -53,6 +53,11 @@ public:
     void RemoveRenderDevice(const std::wstring& device_id);
     void SetDeviceVolume(const std::wstring& device_id, float volume);
 
+    // Prevent feedback: if the current default output device is a render
+    // target, remove it.  Called on device-change notifications and at
+    // Start() time.
+    void CheckAndRemoveDefaultDevice();
+
     // Queries.
     std::vector<std::wstring> GetActiveDeviceIds();
     bool IsRunning() const;

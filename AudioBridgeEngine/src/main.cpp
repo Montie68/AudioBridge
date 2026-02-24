@@ -69,6 +69,12 @@ int main() {
 
     IpcServer   ipc(&engine, &device_mgr);
 
+    // Wire up device-change notifications to remove any render target that
+    // becomes the default output device (prevents audio feedback loops).
+    device_mgr.SetDeviceChangeCallback([&engine]() {
+        engine.CheckAndRemoveDefaultDevice();
+    });
+
     ipc.Start();
 
     std::printf("AudioBridge Engine running. Waiting for commands...\n");

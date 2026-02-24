@@ -48,6 +48,10 @@ bool AudioEngine::Start() {
         return true;
     }
 
+    // Before starting capture, remove any render target that matches the
+    // default output device to prevent audio feedback loops.
+    CheckAndRemoveDefaultDevice();
+
     capture_running_.store(true);
     capture_thread_ = std::thread(&AudioEngine::CaptureThreadProc, this);
     LOG_INFO("AudioEngine started.");
@@ -79,6 +83,16 @@ void AudioEngine::Stop() {
 }
 
 bool AudioEngine::AddRenderDevice(const std::wstring& device_id) {
+    // If the bridge is running, reject adding the current default device
+    // (which is our loopback capture source) to prevent feedback loops.
+    if (capture_running_.load()) {
+        std::wstring default_id = device_mgr_->GetDefaultOutputDeviceId();
+        if (!default_id.empty() && device_id == default_id) {
+            LOG_INFO("Rejected render device: it is the loopback capture source (feedback prevention).");
+            return false;
+        }
+    }
+
     // Check for duplicates AND mark this device as pending so that a
     // concurrent call with the same ID cannot pass the duplicate check
     // while we are setting up the device (TOCTOU fix).
@@ -285,6 +299,28 @@ bool AudioEngine::IsRunning() const {
 void AudioEngine::RequestCaptureRestart() {
     restart_capture_.store(true);
     LOG_INFO("Capture restart requested (default device changed).");
+}
+
+void AudioEngine::CheckAndRemoveDefaultDevice() {
+    std::wstring default_id = device_mgr_->GetDefaultOutputDeviceId();
+    if (default_id.empty()) return;
+
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(targets_mutex_);
+        for (auto& t : targets_) {
+            if (t->device_id == default_id) {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (found) {
+        LOG_INFO("Default device is a bridged render target -- removing to prevent feedback loop.");
+        RemoveRenderDevice(default_id);
+        device_mgr_->RemoveWantedDevice(default_id);
+    }
 }
 
 // ---------------------------------------------------------------------------

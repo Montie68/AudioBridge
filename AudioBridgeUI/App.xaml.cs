@@ -36,6 +36,9 @@ public partial class App : Application
 
         base.OnStartup(e);
 
+        // Handle Windows shutdown / logoff so the app exits cleanly.
+        SessionEnding += App_SessionEnding;
+
         // Create services.
         _settingsService = new SettingsService();
         _ipcClient = new EngineIpcClient();
@@ -108,11 +111,23 @@ public partial class App : Application
         // Stop reconnect service.
         _reconnectService?.Dispose();
 
-        // Stop the engine gracefully.
+        // Stop the engine gracefully.  Use Task.Run to dispatch onto the
+        // thread pool so the async continuations don't try to marshal back
+        // to the (blocked) UI thread, which would cause a deadlock.
         if (_processManager is not null)
         {
-            _processManager.StopEngineAsync().GetAwaiter().GetResult();
+            try
+            {
+                Task.Run(async () => await _processManager.StopEngineAsync())
+                    .Wait(TimeSpan.FromSeconds(3));
+            }
+            catch (Exception)
+            {
+                // Timeout or error -- Windows will terminate the engine anyway.
+            }
+
             _processManager.Dispose();
+            _processManager = null;
         }
 
         // Dispose IPC client.
@@ -267,6 +282,18 @@ public partial class App : Application
             _mainWindow.AllowClose = true;
         }
 
+        Shutdown();
+    }
+
+    private void App_SessionEnding(object sender, SessionEndingCancelEventArgs e)
+    {
+        // Windows is shutting down or the user is logging off.
+        // Allow the main window to close instead of hiding to tray.
+        if (_mainWindow is not null)
+            _mainWindow.AllowClose = true;
+
+        // Trigger the normal shutdown path. OnExit will handle saving
+        // settings and stopping the engine process gracefully.
         Shutdown();
     }
 }

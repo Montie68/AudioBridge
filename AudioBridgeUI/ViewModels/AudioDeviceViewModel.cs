@@ -182,6 +182,20 @@ public class AudioDeviceViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Updates the bridge state from engine-side changes without sending IPC
+    /// commands.  Used when the engine auto-removes a device (e.g., feedback
+    /// prevention when the default device changes).
+    /// </summary>
+    public void SetBridgedFromEngine(bool isBridged)
+    {
+        if (_isBridged == isBridged) return;
+        _isBridged = isBridged;
+        OnPropertyChanged(nameof(IsBridged));
+        OnPropertyChanged(nameof(IsVolumeEnabled));
+        OnPropertyChanged(nameof(StatusBrush));
+    }
+
     private async Task ToggleBridgeAsync(bool addToBridge)
     {
         _isTogglingBridge = true;

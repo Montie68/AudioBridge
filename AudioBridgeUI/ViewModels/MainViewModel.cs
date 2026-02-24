@@ -255,6 +255,25 @@ public class MainViewModel : ViewModelBase, IDisposable
             if (status.HasValue)
             {
                 IsBridgeRunning = status.Value.IsRunning;
+
+                // When the bridge is running, sync per-device bridge state
+                // with the engine's active device list.  This handles cases
+                // where the engine auto-removes a device (e.g., feedback
+                // prevention when the default output device changes).
+                if (status.Value.IsRunning)
+                {
+                    var activeIds = new HashSet<string>(
+                        status.Value.ActiveDeviceIds,
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var device in Devices)
+                    {
+                        if (device.IsBridged && !activeIds.Contains(device.DeviceId))
+                        {
+                            device.SetBridgedFromEngine(false);
+                        }
+                    }
+                }
             }
         }
         catch (Exception ex)
