@@ -233,10 +233,15 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <CheckBox Grid.Column="0"
-                          Content="Start with Windows"
-                          IsChecked="{Binding StartWithWindows}"
-                          Style="{StaticResource DarkCheckBox}"/>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <CheckBox Content="Start with Windows"
+                              IsChecked="{Binding StartWithWindows}"
+                              Style="{StaticResource DarkCheckBox}"
+                              Margin="0,0,16,0"/>
+                    <CheckBox Content="Auto-start bridge"
+                              IsChecked="{Binding AutoStartBridge}"
+                              Style="{StaticResource DarkCheckBox}"/>
+                </StackPanel>
 
                 <Button Grid.Column="1"
                         Content="Refresh"

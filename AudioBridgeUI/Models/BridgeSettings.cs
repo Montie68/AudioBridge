@@ -16,6 +16,11 @@ public class BridgeSettings
     public bool StartWithWindows { get; set; } = true;
 
     /// <summary>
+    /// Whether the audio bridge should start automatically when the application launches.
+    /// </summary>
+    public bool AutoStartBridge { get; set; }
+
+    /// <summary>
     /// Whether devices should be automatically re-added when they become available.
     /// </summary>
     public bool AutoReconnect { get; set; } = true;

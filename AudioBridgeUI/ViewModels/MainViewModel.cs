@@ -43,6 +43,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private bool _isEngineConnected;
     private string _statusText = "Disconnected";
     private bool _startWithWindows;
+    private bool _autoStartBridge;
     private bool _disposed;
 
     /// <summary>
@@ -117,6 +118,20 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether the bridge should start automatically on application launch.
+    /// Persists the setting immediately on change.
+    /// </summary>
+    public bool AutoStartBridge
+    {
+        get => _autoStartBridge;
+        set
+        {
+            if (SetProperty(ref _autoStartBridge, value))
+                SaveCurrentSettings();
+        }
+    }
+
     public ICommand ToggleBridgeCommand { get; }
     public ICommand RefreshDevicesCommand { get; }
 
@@ -128,9 +143,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         ToggleBridgeCommand = new AsyncRelayCommand(ToggleBridgeAsync);
         RefreshDevicesCommand = new AsyncRelayCommand(RefreshDevicesAsync);
 
-        // Load persisted startup preference.
+        // Load persisted preferences.
         BridgeSettings settings = _settingsService.LoadSettings();
         _startWithWindows = settings.StartWithWindows;
+        _autoStartBridge = settings.AutoStartBridge;
         SetStartWithWindows(_startWithWindows);
 
         // Set up periodic polling.
@@ -314,6 +330,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         var settings = new BridgeSettings
         {
             StartWithWindows = _startWithWindows,
+            AutoStartBridge = _autoStartBridge,
             AutoReconnect = true,
             BridgedDevices = new List<BridgedDeviceInfo>()
         };

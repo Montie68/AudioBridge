@@ -55,8 +55,12 @@ public partial class App : Application
         // Restore previously bridged devices from settings.
         await RestoreBridgedDevicesAsync();
 
-        // Start auto-reconnect monitoring.
+        // Auto-start the bridge if the setting is enabled.
         BridgeSettings settings = _settingsService.LoadSettings();
+        if (settings.AutoStartBridge && _ipcClient.IsConnected)
+            await _ipcClient.StartBridgeAsync();
+
+        // Start auto-reconnect monitoring.
         if (settings.AutoReconnect)
             _reconnectService.Start();
 
