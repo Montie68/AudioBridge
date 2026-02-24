@@ -165,13 +165,26 @@ public partial class App : Application
         // The polling timer in MainViewModel will pick up the new status.
     }
 
-    private void TrayExit_Click(object sender, RoutedEventArgs e)
+    private async void TrayExit_Click(object sender, RoutedEventArgs e)
     {
-        // Allow the window to actually close this time.
+        // Stop the audio bridge if it is currently running.
+        if (_ipcClient is not null && _mainViewModel is not null && _mainViewModel.IsBridgeRunning)
+        {
+            await _ipcClient.StopBridgeAsync();
+        }
+
+        // Shut down the engine process asynchronously to avoid deadlocking the UI thread.
+        if (_processManager is not null)
+        {
+            await _processManager.StopEngineAsync();
+            _processManager.Dispose();
+            _processManager = null;
+        }
+
+        // Allow the main window to close instead of hiding to tray.
         if (_mainWindow is not null)
         {
-            // Detach the OnClosing override by closing the window from the application level.
-            _mainWindow = null;
+            _mainWindow.AllowClose = true;
         }
 
         Shutdown();

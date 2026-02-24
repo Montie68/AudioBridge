@@ -9,6 +9,12 @@ namespace AudioBridgeUI;
 /// </summary>
 public partial class MainWindow : Window
 {
+    /// <summary>
+    /// When true, the window will actually close instead of hiding to the tray.
+    /// Set by the tray "Exit" handler before application shutdown.
+    /// </summary>
+    public bool AllowClose { get; set; }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -16,11 +22,15 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Intercepts the window close and hides to the system tray instead.
-    /// The application exits only through the tray context menu "Exit" item.
+    /// The application exits only through the tray context menu "Exit" item,
+    /// which sets <see cref="AllowClose"/> to bypass the hide behavior.
     /// </summary>
     protected override void OnClosing(CancelEventArgs e)
     {
-        e.Cancel = true;
-        Hide();
+        if (!AllowClose)
+        {
+            e.Cancel = true;
+            Hide();
+        }
     }
 }
