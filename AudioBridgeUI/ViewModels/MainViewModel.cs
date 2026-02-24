@@ -270,7 +270,14 @@ public class MainViewModel : ViewModelBase, IDisposable
                     {
                         if (device.IsBridged && !activeIds.Contains(device.DeviceId))
                         {
+                            // Engine removed this device (e.g., feedback prevention).
                             device.SetBridgedFromEngine(false);
+                        }
+                        else if (!device.IsBridged && activeIds.Contains(device.DeviceId))
+                        {
+                            // Engine auto-added this device (e.g., old default
+                            // was bridged when a new default device took over).
+                            device.SetBridgedFromEngine(true);
                         }
                     }
                 }

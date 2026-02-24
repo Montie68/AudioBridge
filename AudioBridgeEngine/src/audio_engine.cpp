@@ -48,6 +48,14 @@ bool AudioEngine::Start() {
         return true;
     }
 
+    // Record which device capture will open so that
+    // CheckAndRemoveDefaultDevice can auto-bridge it later if the default
+    // changes.
+    {
+        std::lock_guard<std::mutex> lock(capture_id_mutex_);
+        capture_device_id_ = device_mgr_->GetDefaultOutputDeviceId();
+    }
+
     // Before starting capture, remove any render target that matches the
     // default output device to prevent audio feedback loops.
     CheckAndRemoveDefaultDevice();
@@ -64,6 +72,11 @@ void AudioEngine::Stop() {
     capture_running_.store(false);
     restart_capture_.store(false);
     if (capture_thread_.joinable()) capture_thread_.join();
+
+    {
+        std::lock_guard<std::mutex> lock(capture_id_mutex_);
+        capture_device_id_.clear();
+    }
 
     // Stop all render targets.
     {
@@ -302,24 +315,60 @@ void AudioEngine::RequestCaptureRestart() {
 }
 
 void AudioEngine::CheckAndRemoveDefaultDevice() {
-    std::wstring default_id = device_mgr_->GetDefaultOutputDeviceId();
-    if (default_id.empty()) return;
+    std::wstring new_default = device_mgr_->GetDefaultOutputDeviceId();
+    if (new_default.empty()) return;
 
-    bool found = false;
+    // Retrieve the device that capture is currently using.
+    std::wstring old_capture;
     {
-        std::lock_guard<std::mutex> lock(targets_mutex_);
-        for (auto& t : targets_) {
-            if (t->device_id == default_id) {
-                found = true;
-                break;
+        std::lock_guard<std::mutex> lock(capture_id_mutex_);
+        old_capture = capture_device_id_;
+    }
+
+    // Remove the new default from render targets (feedback prevention).
+    {
+        bool is_target = false;
+        {
+            std::lock_guard<std::mutex> lock(targets_mutex_);
+            for (auto& t : targets_) {
+                if (t->device_id == new_default) {
+                    is_target = true;
+                    break;
+                }
             }
+        }
+        if (is_target) {
+            LOG_INFO("Default device is a bridged render target -- removing to prevent feedback loop.");
+            RemoveRenderDevice(new_default);
+            device_mgr_->RemoveWantedDevice(new_default);
         }
     }
 
-    if (found) {
-        LOG_INFO("Default device is a bridged render target -- removing to prevent feedback loop.");
-        RemoveRenderDevice(default_id);
-        device_mgr_->RemoveWantedDevice(default_id);
+    // Auto-bridge the old capture device when the default changes so the
+    // user keeps hearing audio on it.  Only do this while the bridge is
+    // actually running and the default genuinely changed.
+    if (capture_running_.load() &&
+        !old_capture.empty() && old_capture != new_default) {
+        // Look up the friendly name for the wanted-device list.
+        std::wstring old_name;
+        auto devices = device_mgr_->GetOutputDevices();
+        for (auto& d : devices) {
+            if (d.id == old_capture) {
+                old_name = d.name;
+                break;
+            }
+        }
+
+        if (AddRenderDevice(old_capture)) {
+            device_mgr_->AddWantedDevice(old_capture, old_name);
+            LOG_INFO("Auto-bridged previous default device after default change.");
+        }
+    }
+
+    // Update the tracked capture device to the new default.
+    {
+        std::lock_guard<std::mutex> lock(capture_id_mutex_);
+        capture_device_id_ = new_default;
     }
 }
 

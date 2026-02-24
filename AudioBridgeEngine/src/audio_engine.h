@@ -80,6 +80,12 @@ private:
     std::atomic<bool>                           restart_capture_{false};
     std::thread                                 capture_thread_;
 
+    // Tracks the device ID that the capture thread is (or will be) using,
+    // so that CheckAndRemoveDefaultDevice can auto-bridge the old default
+    // when the default changes.
+    std::mutex                                  capture_id_mutex_;
+    std::wstring                                capture_device_id_;
+
     // Render targets, guarded by mutex.  pending_ids_ tracks device IDs
     // that are currently being set up (between the duplicate check and the
     // insertion) to prevent TOCTOU races when AddRenderDevice is called
