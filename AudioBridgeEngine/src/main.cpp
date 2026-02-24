@@ -59,21 +59,19 @@ int main() {
 
     AudioEngine engine(&device_mgr);
 
-    // Restart capture when the default audio device changes so the bridge
-    // seamlessly switches to capturing from the new default output.
+    // When the default audio device changes:
+    // 1. Check/remove the new default from render targets (feedback prevention)
+    //    and auto-bridge the old default.
+    // 2. Restart capture to switch loopback to the new default.
+    // Both actions are done in a single callback to guarantee ordering.
     device_mgr.SetDefaultDeviceChangedCallback([&engine]() {
+        engine.CheckAndRemoveDefaultDevice();
         if (engine.IsRunning()) {
             engine.RequestCaptureRestart();
         }
     });
 
     IpcServer   ipc(&engine, &device_mgr);
-
-    // Wire up device-change notifications to remove any render target that
-    // becomes the default output device (prevents audio feedback loops).
-    device_mgr.SetDeviceChangeCallback([&engine]() {
-        engine.CheckAndRemoveDefaultDevice();
-    });
 
     ipc.Start();
 

@@ -26,7 +26,6 @@ struct RenderTarget {
     std::unique_ptr<RingBuffer<float>> ring;
     std::thread                        thread;
     std::atomic<bool>                  running{false};
-    std::atomic<float>                 volume{1.0f};
     HANDLE                             event = nullptr;
 
     // Number of channels the render device is using.
@@ -51,7 +50,6 @@ public:
     // Manage render outputs.
     bool AddRenderDevice(const std::wstring& device_id);
     void RemoveRenderDevice(const std::wstring& device_id);
-    void SetDeviceVolume(const std::wstring& device_id, float volume);
 
     // Prevent feedback: if the current default output device is a render
     // target, remove it.  Called on device-change notifications and at

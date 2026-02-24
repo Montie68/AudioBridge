@@ -48,6 +48,11 @@ bool AudioEngine::Start() {
         return true;
     }
 
+    // Join any previous capture thread that may have exited early
+    // (e.g., due to CoInitializeEx failure) to avoid assigning to a
+    // joinable std::thread, which would call std::terminate.
+    if (capture_thread_.joinable()) capture_thread_.join();
+
     // Record which device capture will open so that
     // CheckAndRemoveDefaultDevice can auto-bridge it later if the default
     // changes.
@@ -67,10 +72,12 @@ bool AudioEngine::Start() {
 }
 
 void AudioEngine::Stop() {
-    if (!capture_running_.load()) return;
-
     capture_running_.store(false);
     restart_capture_.store(false);
+
+    // Always join the capture thread if it's joinable, even if it exited
+    // early (e.g., CoInitializeEx failure).  Skipping join would cause
+    // std::terminate on the next Start() call.
     if (capture_thread_.joinable()) capture_thread_.join();
 
     {
@@ -287,16 +294,6 @@ void AudioEngine::RemoveRenderDevice(const std::wstring& device_id) {
     LOG_INFO("Render device removed.");
 }
 
-void AudioEngine::SetDeviceVolume(const std::wstring& device_id, float volume) {
-    std::lock_guard<std::mutex> lock(targets_mutex_);
-    for (auto& t : targets_) {
-        if (t->device_id == device_id) {
-            t->volume.store(std::clamp(volume, 0.0f, 1.0f));
-            return;
-        }
-    }
-}
-
 std::vector<std::wstring> AudioEngine::GetActiveDeviceIds() {
     std::lock_guard<std::mutex> lock(targets_mutex_);
     std::vector<std::wstring> ids;
@@ -496,8 +493,9 @@ void AudioEngine::CaptureThreadProc() {
         LOG_INFO("Capture thread started (channels=%u, bits=%u, float=%d).",
                  cap_channels, cap_bits, is_float ? 1 : 0);
 
-        // Temporary buffer for format conversion.
+        // Temporary buffers for format conversion and channel remapping.
         std::vector<float> convert_buf;
+        std::vector<float> remap_buf;
 
         // ---- Inner capture loop (exits on shutdown OR restart request) ----
         while (capture_running_.load() && !restart_capture_.load()) {
@@ -544,12 +542,31 @@ void AudioEngine::CaptureThreadProc() {
                     float_data = convert_buf.data();
                 }
 
-                // Fan-out to all render ring buffers.
+                // Fan-out to all render ring buffers, remapping channels
+                // when capture and render channel counts differ.
                 {
                     std::lock_guard<std::mutex> lock(targets_mutex_);
                     for (auto& target : targets_) {
-                        if (target->running.load()) {
+                        if (!target->running.load()) continue;
+                        const UINT32 tgt_ch = target->channel_count;
+                        if (tgt_ch == cap_channels) {
+                            // Same channel count -- direct copy.
                             target->ring->push(float_data, total_samples);
+                        } else {
+                            // Remap: for each frame, copy min(cap, tgt)
+                            // channels and zero-fill or skip the rest.
+                            const UINT32 copy_ch = (std::min)(cap_channels, tgt_ch);
+                            const size_t tgt_samples = static_cast<size_t>(frames_avail) * tgt_ch;
+                            remap_buf.resize(tgt_samples);
+                            for (UINT32 f = 0; f < frames_avail; ++f) {
+                                const float* src_frame = float_data + f * cap_channels;
+                                float*       dst_frame = remap_buf.data() + f * tgt_ch;
+                                for (UINT32 c = 0; c < copy_ch; ++c)
+                                    dst_frame[c] = src_frame[c];
+                                for (UINT32 c = copy_ch; c < tgt_ch; ++c)
+                                    dst_frame[c] = 0.0f;
+                            }
+                            target->ring->push(remap_buf.data(), tgt_samples);
                         }
                     }
                 }
