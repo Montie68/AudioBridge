@@ -83,6 +83,10 @@ void AudioEngine::Stop() {
     {
         std::lock_guard<std::mutex> lock(capture_id_mutex_);
         capture_device_id_.clear();
+        capture_sample_rate_     = 0;
+        capture_bits_per_sample_ = 0;
+        capture_is_float_        = false;
+        pending_reinit_ids_.clear();
     }
 
     // Stop all render targets.
@@ -186,9 +190,39 @@ bool AudioEngine::AddRenderDevice(const std::wstring& device_id) {
 
     UINT32 channels = mix_fmt->nChannels;
 
-    // Initialize in shared mode with auto-conversion so the engine always
-    // feeds the same format from the capture side and WASAPI resamples as
-    // needed.
+    // Override the render format's sample rate and sample type to match the
+    // capture (loopback) source.  We keep the render device's channel count
+    // because the engine already handles channel remapping.  With
+    // AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | SRC_DEFAULT_QUALITY, WASAPI will
+    // resample from the capture rate to the device's native rate.
+    {
+        std::lock_guard<std::mutex> lock(capture_id_mutex_);
+        if (capture_sample_rate_ != 0) {
+            mix_fmt->nSamplesPerSec  = capture_sample_rate_;
+            mix_fmt->wBitsPerSample  = capture_is_float_ ? 32 : capture_bits_per_sample_;
+            if (mix_fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+                auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(mix_fmt);
+                ext->SubFormat = capture_is_float_
+                    ? KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+                    : KSDATAFORMAT_SUBTYPE_PCM;
+                ext->Samples.wValidBitsPerSample = mix_fmt->wBitsPerSample;
+            } else {
+                mix_fmt->wFormatTag = capture_is_float_
+                    ? WAVE_FORMAT_IEEE_FLOAT
+                    : WAVE_FORMAT_PCM;
+                mix_fmt->cbSize = 0;
+            }
+            mix_fmt->nBlockAlign     = mix_fmt->nChannels * (mix_fmt->wBitsPerSample / 8);
+            mix_fmt->nAvgBytesPerSec = mix_fmt->nSamplesPerSec * mix_fmt->nBlockAlign;
+
+            LOG_INFO("Render format overridden to capture: %lu Hz, %u-bit, %s, %u ch.",
+                     mix_fmt->nSamplesPerSec, mix_fmt->wBitsPerSample,
+                     capture_is_float_ ? "float" : "PCM", channels);
+        }
+    }
+
+    // Initialize in shared mode with auto-conversion so WASAPI resamples
+    // from the capture format to the device's native format as needed.
     const DWORD stream_flags = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
                                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY |
                                AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
@@ -440,6 +474,35 @@ void AudioEngine::CaptureThreadProc() {
                 is_float = true;
         }
 
+        // Publish the capture format so that AddRenderDevice can initialise
+        // render streams with the same sample rate / bit depth.
+        {
+            std::lock_guard<std::mutex> lock(capture_id_mutex_);
+            capture_sample_rate_     = cap_fmt->nSamplesPerSec;
+            capture_bits_per_sample_ = cap_bits;
+            capture_is_float_        = is_float;
+        }
+
+        LOG_INFO("Capture format: %u Hz, %u-bit, %s, %u ch.",
+                 cap_fmt->nSamplesPerSec, cap_bits,
+                 is_float ? "float" : "PCM", cap_channels);
+
+        // Re-add any render devices that were torn down for a format change.
+        {
+            std::vector<std::wstring> reinit;
+            {
+                std::lock_guard<std::mutex> lock(capture_id_mutex_);
+                reinit.swap(pending_reinit_ids_);
+            }
+            for (auto& id : reinit) {
+                if (AddRenderDevice(id)) {
+                    LOG_INFO("Re-added render device after capture format change.");
+                } else {
+                    LOG_INFO("Re-add of render device was rejected (may be the new default).");
+                }
+            }
+        }
+
         const DWORD loopback_flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
                                      AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
         const REFERENCE_TIME buffer_duration = 1000000; // 100 ms
@@ -583,7 +646,32 @@ void AudioEngine::CaptureThreadProc() {
 
         if (restart_capture_.load() && capture_running_.load()) {
             LOG_INFO("Restarting capture for new default device...");
+
+            // The new default device may have a different sample rate.
+            // Re-initialise all render devices so they are configured for
+            // the new capture format.  Collect IDs first, then tear down
+            // and re-add outside the lock.
+            std::vector<std::wstring> ids;
+            {
+                std::lock_guard<std::mutex> lock(targets_mutex_);
+                for (auto& t : targets_)
+                    ids.push_back(t->device_id);
+            }
+            for (auto& id : ids) RemoveRenderDevice(id);
+
+            // Clear the capture format so any externally-initiated
+            // AddRenderDevice during the sleep uses the device's own
+            // format (WASAPI will still handle it via AUTOCONVERTPCM).
+            {
+                std::lock_guard<std::mutex> lock(capture_id_mutex_);
+                capture_sample_rate_ = 0;
+                pending_reinit_ids_  = std::move(ids);
+            }
+
+            // Allow Windows audio subsystem to stabilise after the
+            // default device change before re-opening capture.
             Sleep(200);
+
             continue;
         }
     } // end outer while

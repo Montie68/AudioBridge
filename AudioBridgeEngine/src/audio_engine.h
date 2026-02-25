@@ -78,11 +78,15 @@ private:
     std::atomic<bool>                           restart_capture_{false};
     std::thread                                 capture_thread_;
 
-    // Tracks the device ID that the capture thread is (or will be) using,
-    // so that CheckAndRemoveDefaultDevice can auto-bridge the old default
-    // when the default changes.
+    // Tracks the device ID and audio format that the capture thread is (or
+    // will be) using, so that CheckAndRemoveDefaultDevice can auto-bridge
+    // the old default and AddRenderDevice can match the capture format.
     std::mutex                                  capture_id_mutex_;
     std::wstring                                capture_device_id_;
+    DWORD                                       capture_sample_rate_    = 0;
+    WORD                                        capture_bits_per_sample_ = 0;
+    bool                                        capture_is_float_       = false;
+    std::vector<std::wstring>                   pending_reinit_ids_;  // devices to re-add after format change
 
     // Render targets, guarded by mutex.  pending_ids_ tracks device IDs
     // that are currently being set up (between the duplicate check and the
