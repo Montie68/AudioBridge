@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,9 +28,13 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        // Kill any existing AudioBridge processes (UI + engine) from this
+        // or another user session so we get a clean named pipe and device list.
+        KillExistingInstances();
+
         if (!SingleInstanceMutex.WaitOne(TimeSpan.Zero, exitContext: false))
         {
-            // Another instance is already running.
+            // Another instance is still running after kill attempt.
             Shutdown();
             return;
         }
@@ -140,6 +145,51 @@ public partial class App : Application
         try { SingleInstanceMutex.ReleaseMutex(); } catch (ApplicationException) { }
 
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Kills any running AudioBridge processes (engine first, then UI) so this
+    /// instance starts with a clean named pipe.  Handles processes owned by
+    /// other user sessions that would otherwise hold the pipe open.
+    /// </summary>
+    private static void KillExistingInstances()
+    {
+        int currentPid = Environment.ProcessId;
+
+        // Kill engine processes first — if we kill the UI first the engine
+        // process manager may auto-restart the engine before we get to it.
+        foreach (string name in new[] { "AudioBridgeEngine", "AudioBridgeUI" })
+        {
+            Process[] processes;
+            try
+            {
+                processes = Process.GetProcessesByName(name);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Process proc in processes)
+            {
+                try
+                {
+                    if (proc.Id == currentPid)
+                        continue;
+
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(2000);
+                }
+                catch
+                {
+                    // Process already exited or access denied (cross-session).
+                }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }
+        }
     }
 
     /// <summary>
