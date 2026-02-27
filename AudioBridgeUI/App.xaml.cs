@@ -107,11 +107,15 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        // Save current settings.
-        _mainViewModel?.SaveCurrentSettings();
+        // Stop polling FIRST so the timer cannot clear IsBridged state
+        // before we persist settings (the engine's Stop() empties the
+        // active device list, and a poll tick would sync that back to the UI).
         if (_mainViewModel is not null)
+        {
             _mainViewModel.PropertyChanged -= OnMainViewModelPropertyChanged;
-        _mainViewModel?.Dispose();
+            _mainViewModel.Dispose();          // stops the poll timer
+            _mainViewModel.SaveCurrentSettings();
+        }
 
         // Stop reconnect service.
         _reconnectService?.Dispose();
@@ -312,6 +316,11 @@ public partial class App : Application
 
     private async void TrayExit_Click(object sender, RoutedEventArgs e)
     {
+        // Save settings BEFORE stopping the bridge — Stop() clears the
+        // engine's active device list, and a poll tick in between would
+        // reset all IsBridged flags to false.
+        _mainViewModel?.SaveCurrentSettings();
+
         // Stop the audio bridge if it is currently running.
         if (_ipcClient is not null && _mainViewModel is not null && _mainViewModel.IsBridgeRunning)
         {
